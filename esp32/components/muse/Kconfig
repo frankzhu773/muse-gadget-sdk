@@ -255,6 +255,33 @@ menu "Muse"
             them. Needs PSRAM. Without it, voice notes go over Home Link's own
             session to its paired VM and replies are shown as text.
 
+    config MUSE_CHAT_SIDE_CHAT
+        bool "Send voice notes to a side chat"
+        depends on MUSE_ENABLED
+        default n
+        help
+            Push-to-talk turns and typed turns go to a side chat of their own
+            in the Muse app instead of the main chat. Useful for a
+            single-purpose gadget, such as a journal.
+
+    config MUSE_CHAT_SESSION_ID
+        string "Side chat id"
+        depends on MUSE_CHAT_SIDE_CHAT
+        default ""
+        help
+            The side chat's id, a UUID such as one from `uuidgen`. A new id
+            starts a new side chat; keep it to keep adding to the same one.
+            Letters, digits and dashes only.
+
+    config MUSE_CHAT_SIDE_CHAT_PROMPT
+        string "Message sent with each voice note"
+        depends on MUSE_CHAT_SIDE_CHAT
+        default ""
+        help
+            Text that goes with every voice note, so Muse knows what the side
+            chat is for, e.g. "Journal entry from my journal gadget". Empty
+            sends the voice note alone. No double quotes or backslashes.
+
     config MUSE_HATCH_COMPACT_BUFFERS
         bool "Smaller voice session buffers, for 2 MB of PSRAM"
         depends on MUSE_HATCH

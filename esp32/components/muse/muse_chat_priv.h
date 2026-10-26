@@ -23,6 +23,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"
+#endif
+
 #include "muse_chat.h"
 
 #ifdef __cplusplus
@@ -69,10 +73,21 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
     memcpy(rejected->ids[rejected->count++], id, len + 1);
 }
 
+/* With CONFIG_MUSE_CHAT_SIDE_CHAT, turns go to that side chat; otherwise the
+ * main chat. The subscription stays on every chat (a side chat doesn't exist
+ * until its first message), and replies are matched to the turn by message id. */
+#if CONFIG_MUSE_CHAT_SIDE_CHAT
+#define MUSE_CHAT_SESSION_FIELD "\"session_id\":\"" CONFIG_MUSE_CHAT_SESSION_ID "\","
+#define MUSE_CHAT_NOTE_MESSAGE CONFIG_MUSE_CHAT_SIDE_CHAT_PROMPT
+#else
+#define MUSE_CHAT_SESSION_FIELD ""
+#define MUSE_CHAT_NOTE_MESSAGE ""
+#endif
+
 /* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
 #define MUSE_HATCH_NOTE_HEAD \
-    "{\"message\":\"\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
-    "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
+    "{" MUSE_CHAT_SESSION_FIELD "\"message\":\"" MUSE_CHAT_NOTE_MESSAGE "\",\"output_modality\":\"text\"," \
+    "\"items\":[{\"type\":\"file\",\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
 #define MUSE_HATCH_WAV_HEADER 44
 

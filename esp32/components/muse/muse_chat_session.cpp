@@ -806,10 +806,28 @@ static bool resolve_vm(char *err, size_t err_cap)
     return false;
 }
 
+/*
+ * Side chat replies only come on a subscription to that side chat, and the
+ * server answers 404 to one until its first message creates it. Until then
+ * the subscription is to every chat, and the first acknowledged turn moves
+ * it to the side chat (s_resubscribe, done by the task loop).
+ */
+#if CONFIG_MUSE_CHAT_SIDE_CHAT
+#define SIDE_CHAT_SUBSCRIBE "{\"session_id\":\"" CONFIG_MUSE_CHAT_SESSION_ID "\"}"
+static bool s_side_chat_missing;
+#else
+#define SIDE_CHAT_SUBSCRIBE "{}"
+static bool s_side_chat_missing = true;
+#endif
+static bool s_sub_side_chat;
+static bool s_resubscribe;
+
 static bool open_subscription(void)
 {
     s_last_seq = 0;
-    s_conn.sub_id = open_stream(K_SUB, "POST", "/chat/subscribe", "application/json", "application/x-ndjson", "{}",
+    s_sub_side_chat = !s_side_chat_missing;
+    const char *body = s_sub_side_chat ? SIDE_CHAT_SUBSCRIBE : "{}";
+    s_conn.sub_id = open_stream(K_SUB, "POST", "/chat/subscribe", "application/json", "application/x-ndjson", body,
                                 true);
     return s_conn.sub_id != 0;
 }
@@ -1180,6 +1198,9 @@ static void send_chat(const char *text, const char *modality)
 {
     s_turn.chat_posted = true;
     cJSON *body = cJSON_CreateObject();
+#if CONFIG_MUSE_CHAT_SIDE_CHAT
+    cJSON_AddStringToObject(body, "session_id", CONFIG_MUSE_CHAT_SESSION_ID);
+#endif
     cJSON_AddStringToObject(body, "message", text);
     cJSON_AddStringToObject(body, "output_modality", modality);
     char *json = cJSON_PrintUnformatted(body);
@@ -1503,6 +1524,13 @@ static void on_chat_ack(stream_t *s)
     mark(M_ACK);
     ESP_LOGI(TAG, "chat/stream ack: user message %s", s_turn.user_ids[0]);
     cJSON_Delete(root);
+#if CONFIG_MUSE_CHAT_SIDE_CHAT
+    if (s_side_chat_missing) {
+        /* This message created the side chat: its reply comes on a subscription to it. */
+        s_side_chat_missing = false;
+        s_resubscribe = true;
+    }
+#endif
     emit(MUSE_HATCH_EV_SENT, nullptr);
 }
 
@@ -1805,6 +1833,13 @@ static bool on_http_error(stream_t *s, const ApplicationResponseView &resp)
     memcpy(body, resp.body.data(), n);
     body[n] = '\0';
     ESP_LOGW(TAG, "stream %lld: HTTP %d %s", (long long)s->id, (int)resp.status, body);
+    if (s->kind == K_SUB && resp.status == 404 && s_sub_side_chat) {
+        ESP_LOGI(TAG, "side chat not created yet: subscribing to every chat until its first message");
+        s_side_chat_missing = true;
+        close_stream(s);
+        s_resubscribe = true;
+        return true;
+    }
     return stream_end(s, false);
 }
 
@@ -1986,6 +2021,16 @@ static void hatch_task(void *arg)
         if (!poll_socket()) {
             drop_connection("receive failed");
             continue;
+        }
+        if (s_resubscribe) {
+            s_resubscribe = false;
+            if (find_stream(s_conn.sub_id)) {
+                send_reset(s_conn.sub_id);
+            }
+            if (!open_subscription()) {
+                drop_connection("subscribe failed");
+                continue;
+            }
         }
         bool sent = true;
         if (s_turn.phase == P_LISTEN) {
